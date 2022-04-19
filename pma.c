@@ -81,6 +81,24 @@ bool CASM( marker_t *p, marker_t old, marker_t new ) {
     return false;
   }
 }
+/* double compare and swap implementation for value*/
+bool DCAS( uint64_t *p, uint64_t *q, uint64_t old_p, uint64_t new_p, uint64_t old_q, uint64_t new_q) {
+  if( *p == old_p && *q == old_q) {
+    (*p = new_p) && (*q = new_p);
+    return true;
+  } else {
+    return false;
+  }
+}
+/* compare and swap implementation for value*/
+bool CAS( uint64_t *p, uint64_t old_p, uint64_t new_p) {
+  if( *p == old_p && *q == old_q) {
+    (*p = new_p) && (*q = new_p);
+    return true;
+  } else {
+    return false;
+  }
+}
 /* Returns true if keyval is empty and false otherwise. */
 bool keyval_empty (const keyval_t *keyval) {
   return (keyval->key == 0ULL);
@@ -268,7 +286,7 @@ void pma_insert_after (PMA pma, int64_t i, key_t key, val_t val) {
       }
       j--;
     }
-    // pma->array [i+1].key = key;
+    // pma->array [i0].key = key;
     // pma->array [i+1].val = val;
     // printf("Cell version: %d , Marker version: %d\n", pma->array [i + 1].version , pma->array [i + 1].mark.version);
     while(true){
@@ -463,33 +481,38 @@ static bool pack (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
   while (read_index < to) {
     if (!keyval_empty (&(pma->array [read_index]))) {
       if (read_index > write_index) {
-        // (pma->array [write_index].key = pma->array [read_index].key);
-        // (pma->array [write_index].val = pma->array [read_index].val);
-        // keyval_clear (&(pma->array [read_index]));
-        // printf("Cell version: %d , Marker version: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version);
-        // assert(pma->array [read_index].version == pma->array [read_index].mark.version);
-        while(true){
-          bool help = false;
-          if(pma->array [read_index].version < pma->array [read_index].mark.version){
-            printf("Stuck9\n");
-            return false;
-          }
-          // if(pma->array [read_index].mark.operation == 0){
-            // perform CAS on the cell marker
-            marker_t old = pma->array[read_index].mark;
-            marker_t new = {.operation = 2, .key = 0, .val = 0, .version = old.version + 1};
-            if(CASM(&pma->array[read_index].mark, old, new)){
-              (pma->array [write_index].key = pma->array [read_index].key);
-              (pma->array [write_index].val = pma->array [read_index].val);
-              keyval_clear (&(pma->array [read_index]));
+        bool help = false;
+        if(pma->array [read_index].version < pma->array [read_index].mark.version){
+          printf("Stuck9\n");
+          return false;
+        }
+        if(pma->array[read_index].mark.operation == 0){
+          marker_t old = pma->array[read_index].mark;
+          marker_t new = {.operation = 1, .key = 0, .val = old.key, .version = old.version + 1};
+          if(CASM(&pma->array[read_index].mark, old, new)){
+            uint64_t old_key = pma->array [write_index].key;
+            uint64_t old_val = pma->array [write_index].val;
+            if(DCAS(&pma->array [write_index].key, &pma->array [write_index].val, old_key, pma->array [read_index].key, old_val, pma->array [read_index].val)){
+              uint64_t old_key_from = pma->array [read_index].key;
+              help = true;
+              if(!CAS(&pma->array [read_index].key, old_key_from, 0ULL)){
+                //can fail here because can be helped
+              }
+            }else{
               (pma->array [read_index].mark.operation = 0);
               (pma->array [read_index].version = pma->array [read_index].mark.version);
-              break;
-            }else{
-              printf("Stuck10\n");
               return false;
             }
-          // }
+            (pma->array [read_index].mark.operation = 0);
+            (pma->array [read_index].version = pma->array [read_index].mark.version);
+          }else{
+            printf("Stuck10\n");
+            return false;
+          }
+        }else{
+          if(help){
+            pma->array [read_index].key = 0ULL;
+          }
         }
       }
       write_index++;
