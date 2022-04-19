@@ -64,7 +64,7 @@ typedef struct{
   key_t key;
   val_t val;
 } marker_t;
-typedef struct {
+typedef struct{
   key_t key;
   val_t val;
   uint64_t version;
@@ -358,7 +358,7 @@ void pma_get (PMA pma, int64_t i, keyval_t *keyval) {
 
 void pma_print (PMA pma) {
   for(int x=0;x<pma->m;x++){
-    printf("Index: %d, key: %d, value: %d\n", x, pma->array[x].key, pma->array[x].val);
+    printf("Index: %d, key: %d, value: %d, version: %d\n", x, pma->array[x].key, pma->array[x].val, pma->array[x].version);
   }
 }
 
@@ -557,11 +557,20 @@ static bool spread (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
 
 static bool resize (PMA pma) {
   if (!pack (pma, 0, pma->m, pma->n)) return false;
+  uint64_t old_m = pma->m;
   compute_capacity (pma);
   pma->h = floor_lg (pma->num_segments) + 1;
   pma->delta_t = (t_0 - t_h) / pma->h;
   pma->delta_p = (p_h - p_0) / pma->h;
   pma->array = (keyval_t *)realloc (pma->array, sizeof (keyval_t) * pma->m);
+  for(int x=old_m;x<pma->m;x++){
+    pma->array[x].version = 0;
+    marker_t mk1 = {.operation = 0, .key = 0, .val = 0, .version = 0};
+    pma->array[x].mark = mk1;
+    // printf("Version: %d for index: %d\n",pma->array[x].mark.version, x);
+    // assert(pma->array[x].version < 200 && pma->array[x].version >= 0);
+  }
+  assert(pma->array[76].mark.version < 200 && pma->array[76].mark.version >= 0);
   for (uint64_t i = pma->n; i < pma->m; i++)
     keyval_clear (&(pma->array [i]));
   if (!spread (pma, 0, pma->m, pma->n)) return false;
