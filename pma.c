@@ -19,7 +19,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
-
+#include <math.h>
+#include <pthread.h>
 /*
  * Returns the 1-based index of the last (i.e., most significant) bit set in x.
  */
@@ -165,7 +166,7 @@ PMA pma_create () {
   }
   return (pma);
 }
-
+PMA pma1;
 PMA pma_from_array (keyval_t *array, uint64_t n) {
   assert (n > 0);
   PMA pma = (PMA)malloc (sizeof (pma_t));
@@ -304,7 +305,7 @@ void pma_insert_after (PMA pma, int64_t i, key_t key, val_t val) {
       }
       // pma->array [i].key = key;
       // pma->array [i].val = val;
-      printf("Cell version: %d , Marker version: %d\n", pma->array [i].version , pma->array [i].mark.version);
+      // printf("Cell version: %d , Marker version: %d\n", pma->array [i].version , pma->array [i].mark.version);
       while(true){
         if(pma->array [i].version < pma->array [i].mark.version){
           continue;
@@ -427,8 +428,8 @@ static bool pack (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
         // (pma->array [write_index].key = pma->array [read_index].key);
         // (pma->array [write_index].val = pma->array [read_index].val);
         // keyval_clear (&(pma->array [read_index]));
-        printf("Cell version: %d , Marker version: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version);
-        assert(pma->array [read_index].version == pma->array [read_index].mark.version);
+        // printf("Cell version: %d , Marker version: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version);
+        // assert(pma->array [read_index].version == pma->array [read_index].mark.version);
         while(true){
           bool help = false;
           if(pma->array [read_index].version < pma->array [read_index].mark.version){
@@ -498,8 +499,8 @@ static bool spread (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
     // pma->array [write_index >> 8].key = pma->array [read_index].key;
     // pma->array [write_index >> 8].val = pma->array [read_index].val;
     // keyval_clear (&(pma->array [read_index]));
-    printf("Cell version: %d , Marker version: %d, Read Index: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version, read_index);
-    assert(pma->array [read_index].version == pma->array [read_index].mark.version);
+    // printf("Cell version: %d , Marker version: %d, Read Index: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version, read_index);
+    // assert(pma->array [read_index].version == pma->array [read_index].mark.version);
     while(true){
       bool help = false;
       if(pma->array [read_index].version < pma->array [read_index].mark.version){
@@ -570,7 +571,7 @@ static bool resize (PMA pma) {
     // printf("Version: %d for index: %d\n",pma->array[x].mark.version, x);
     // assert(pma->array[x].version < 200 && pma->array[x].version >= 0);
   }
-  assert(pma->array[76].mark.version < 200 && pma->array[76].mark.version >= 0);
+  // assert(pma->array[76].mark.version < 200 && pma->array[76].mark.version >= 0);
   for (uint64_t i = pma->n; i < pma->m; i++)
     keyval_clear (&(pma->array [i]));
   if (!spread (pma, 0, pma->m, pma->n)) return false;
@@ -592,18 +593,50 @@ static void compute_capacity (PMA pma) {
   assert (pma->m > pma->n);
 }
 
+void *threadFunc(void *args){
+  int tid = *((int *)args);
+  // printf("tid is %d\n", tid);
+  int t_ms=0;
+  clock_t t_before = clock();
+  for(int i=pow(10,tid);i<pow(10,tid+1);i++){
+    pma_insert(pma1, i+1, i+1);
+    clock_t difference = clock() - t_before;
+    t_ms = difference * 1000 / CLOCKS_PER_SEC;
+  }
+  // printf("Time taken by thread %d: %d seconds %d milliseconds\n",tid,
+  // t_ms/1000, t_ms%1000);
+  pthread_exit(NULL);
+
+}
 int main(int argc, char *argv[]) {
-  PMA pma1 = pma_create();
+  printf("here\n");
+  pma1 = pma_create();
+  pthread_t tid[7];
   int msec = 0, trigger = 10; /* 10ms */
   clock_t before = clock();
-  for(int i=0;i<140;i++){
-    pma_insert(pma1, i+1, i+1);
-    clock_t difference = clock() - before;
-    msec = difference * 1000 / CLOCKS_PER_SEC;
+  for(int i=0;i<5;i++){
+    int *temp = calloc(1,sizeof(int));
+    *temp = i;
+    // printf("i %d\n",i);
+    if(pthread_create(&tid[i],NULL,threadFunc, (void *)temp)!=0){
+      // printf("Cannot spawn thread\n");
+      exit(-1);
+    }
+    // printf("After create\n");
+    
   }
-  printf("Time taken: %d seconds %d milliseconds\n",
-  msec/1000, msec%1000);
-  pma_print(pma1);
+  for(int i=0;i<1;i++){
+    if(pthread_join(tid[i],NULL)!=0){
+      printf("Oops");
+      exit(-1);
+    }
+  }
+  clock_t difference = clock() - before;
+  msec = difference * 1000 / CLOCKS_PER_SEC;
+  // printf("Time taken: %d seconds %d milliseconds\n",
+  // msec/1000, msec%1000);
+  // pma_print(pma1);
   printf("Elements: %d\n", pma1->n);
   printf("Capacity: %d", pma1->m);
+  pthread_exit(NULL);
 }
