@@ -21,6 +21,7 @@
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
+#define NO_OF_THREADS 3
 /*
  * Returns the 1-based index of the last (i.e., most significant) bit set in x.
  */
@@ -91,9 +92,9 @@ bool DCAS( uint64_t *p, uint64_t *q, uint64_t old_p, uint64_t new_p, uint64_t ol
   }
 }
 /* compare and swap implementation for value*/
-bool CAS( uint64_t *p, uint64_t old_p, uint64_t new_p) {
-  if( *p == old_p && *q == old_q) {
-    (*p = new_p) && (*q = new_p);
+bool CAS( uint64_t *p, uint64_t old, uint64_t new) {
+  if( *p == old) {
+    *p = new;
     return true;
   } else {
     return false;
@@ -238,8 +239,25 @@ bool pma_insert (PMA pma, key_t key, val_t val) {
   int64_t i;
   if (!pma_find (pma, key, &i)) {  /* We do not allow duplicates.*/
     // printf("index: %d\n",i);
-    pma_insert_after (pma, i, key, val);
-    return (true);
+    if(pma->n == 0){
+      printf("n is 0 and i is %d\n", i+1);
+      while(true){
+        if(pma->array [i+1].mark.operation == 0){
+          uint64_t old_key = pma->array [i+1].key;
+          uint64_t old_val = pma->array [i+1].val;
+          if(!DCAS(&pma->array [i+1].key, &pma->array [i+1].val, old_key, key, old_val, val)){
+            continue;
+          }
+          break;
+        }
+      }
+      pma->n++;
+      printf("1 element added, Version: %d\n", pma->array [i+1].mark.version);
+      return true;
+    }else{
+      pma_insert_after (pma, i, key, val);
+      return (true);
+    }
   }
   return (false);
 }
@@ -255,67 +273,82 @@ void pma_insert_after (PMA pma, int64_t i, key_t key, val_t val) {
     j++;
   // printf("index: %d\n",i);
   if (j < pma->m) {  /* Found one. */
+  printf("FOUND\n");
     while (j > i + 1) {  /* Push elements to make space for the new element. */
       while(true){
+        bool help = false;
         if(pma->array [j].version < pma->array [j].mark.version){
           printf("Stuck1\n");
           continue;
         }
-        if(pma->array [j].mark.operation == 0){
-          // perform CAS on the cell marker
+        if(pma->array[j].mark.operation == 0){
           marker_t old = pma->array[j].mark;
-          marker_t new = {.operation = 1, .key = pma->array [j - 1].key, .val = pma->array [j - 1].val, .version = old.version + 1};
+          marker_t new = {.operation = 1, .key = 0, .val = old.key, .version = old.version + 1};
           if(CASM(&pma->array[j].mark, old, new)){
-            pma->array [j].key = pma->array [j - 1].key;
-            pma->array [j].val = pma->array [j - 1].val;
-            pma->array [j].mark = pma->array [j - 1].mark;
-            pma->array [j].version = pma->array [j - 1].version;
-            pma->array [j].mark.operation = 0;
-            pma->array [j].version = pma->array [j].mark.version;
-            break;
+            uint64_t old_key = pma->array [j-1].key;
+            uint64_t old_val = pma->array [j-1].val;
+            if(DCAS(&pma->array [j-1].key, &pma->array [j-1].val, old_key, pma->array [j].key, old_val, pma->array [j].val)){
+              pma->array[j-1].mark = pma->array[j].mark;
+              pma->array[j-1].version = pma->array[j].version;
+              uint64_t old_key_from = pma->array [j].key;
+              help = true;
+              if(!CAS(&pma->array [j].key, old_key_from, 0ULL)){
+                //can fail here because can be helped
+              }
+              (pma->array [j].mark.operation = 0);
+              (pma->array [j].version = pma->array [j].mark.version);
+              break;
+            }else{
+              (pma->array [j].mark.operation = 0);
+              (pma->array [j].version = pma->array [j].mark.version);
+              continue;
+            }
           }else{
             printf("Stuck2\n");
             continue;
           }
+        }else{
+          if(help){
+            pma->array [j].key = pma->array [j].mark.key;
+            pma->array [j].val = pma->array [j].mark.val;
+          }
         }
-        // else{
-        //   // Help the marked operation
-        //   pma->array [j].key = pma->array [j-1].mark.key;
-        //   pma->array [j].val = pma->array [j-1].mark.val;
-        // }
       }
       j--;
     }
-    // pma->array [i0].key = key;
+    printf("version: %d and marker version: %d\n", pma->array [2].version,  pma->array [2].mark.version);
+    // pma->array [i+1].key = key;
     // pma->array [i+1].val = val;
     // printf("Cell version: %d , Marker version: %d\n", pma->array [i + 1].version , pma->array [i + 1].mark.version);
     while(true){
-      if(pma->array [i + 1].version < pma->array [i + 1].mark.version){
+      bool help = false;
+      if(pma->array [i].version < pma->array [i].mark.version){
         printf("Stuck3\n");
         continue;
       }
-      if(pma->array [i + 1].mark.operation == 0){
+      if(pma->array [i].mark.operation == 0){
         // perform CAS on the cell marker
-        marker_t old = pma->array[i+1].mark;
+        marker_t old = pma->array[i].mark;
         marker_t new = {.operation = 1, .key = key, .val = val, .version = old.version + 1};
-        if(CASM(&pma->array[i+1].mark, old, new)){
-          pma->array [i + 1].key = key;
-          pma->array [i + 1].val = val;
-          pma->array [i + 1].mark.operation = 0;
-          pma->array [i + 1].version = pma->array [i + 1].mark.version;
+        if(CASM(&pma->array[i].mark, old, new)){
+          uint64_t old_key = pma->array [i + 1].key;
+          uint64_t old_val = pma->array [i + 1].val;
+          if(!DCAS(&pma->array [i+1].key, &pma->array [i + 1].val, old_key, key, old_val, val)){
+            pma->array [i].mark.operation = 0;
+            pma->array [i].version = pma->array [i].mark.version;
+            continue;
+          }
+          pma->array [i].mark.operation = 0;
+          pma->array [i].version = pma->array [i].mark.version;
           break;
         }else{
           printf("Stuck4\n");
           continue;
         }
       }
-      // else{
-      //   // Help the marked operation
-      //   pma->array [i + 1].key = pma->array [i + 1].mark.key;
-      //   pma->array [i + 1].val = pma->array [i + 1].mark.val;
-      // }
     }
     i = i + 1;  /* Update i to point to where the new element is. */
+    printf("version: %d and marker version: %d\n", pma->array [2].version,  pma->array [2].mark.version);
   } else {  /* No empty space to the right of i. Try left. */
     j = i - 1;
     while (j >= 0 && !keyval_empty (&(pma->array [j])))
@@ -327,38 +360,78 @@ void pma_insert_after (PMA pma, int64_t i, key_t key, val_t val) {
         // pma->array [j].mark = pma->array [j + 1].mark;
         // pma->array [j].version = pma->array [j + 1].version;
         while(true){
+          bool help = false;
           if(pma->array [j].version < pma->array [j].mark.version){
             printf("Stuck5\n");
             continue;
           }
-          if(pma->array [j].mark.operation == 0){
-            // perform CAS on the cell marker
+          if(pma->array[j].mark.operation == 0){
             marker_t old = pma->array[j].mark;
-            marker_t new = {.operation = 1, .key = pma->array [j + 1].key, .val = pma->array [j + 1].val, .version = old.version + 1};
+            marker_t new = {.operation = 1, .key = 0, .val = old.key, .version = old.version + 1};
             if(CASM(&pma->array[j].mark, old, new)){
-              pma->array [j].key = pma->array [j + 1].key;
-              pma->array [j].val = pma->array [j + 1].val;
-              pma->array [j].mark = pma->array [j + 1].mark;
-              pma->array [j].version = pma->array [j + 1].version;
-              pma->array [j].mark.operation = 0;
-              pma->array [j].version = pma->array [j].mark.version;
-              break;
+              uint64_t old_key = pma->array [j+1].key;
+              uint64_t old_val = pma->array [j+1].val;
+              if(DCAS(&pma->array [j+1].key, &pma->array [j+1].val, old_key, pma->array [j].key, old_val, pma->array [j].val)){
+                pma->array[j+1].mark = pma->array[j].mark;
+                pma->array[j+1].version = pma->array[j].version;
+                uint64_t old_key_from = pma->array [j].key;
+                help = true;
+                if(!CAS(&pma->array [j].key, old_key_from, 0ULL)){
+                  //can fail here because can be helped
+                }
+                (pma->array [j].mark.operation = 0);
+                (pma->array [j].version = pma->array [j].mark.version);
+                break;
+              }else{
+                (pma->array [j].mark.operation = 0);
+                (pma->array [j].version = pma->array [j].mark.version);
+              }
             }else{
               printf("Stuck6\n");
-              continue;
+            }
+          }else{
+            if(help){
+              pma->array [j].key = pma->array [j].mark.key;
+              pma->array [j].val = pma->array [j].mark.val;
             }
           }
-          // else{
-          //   // Help the marked operation
-          //   pma->array [j].key = pma->array [j + 1].mark.key;
-          //   pma->array [j].val = pma->array [j + 1].mark.val;
-          // }
         }
         j++;
       }
-      // pma->array [i].key = key;
-      // pma->array [i].val = val;
-      // printf("Cell version: %d , Marker version: %d\n", pma->array [i].version , pma->array [i].mark.version);
+      while(true){
+      bool help = false;
+      if(pma->array [i-1].version < pma->array [i-1].mark.version){
+        printf("Stuck7\n");
+        continue;
+      }
+      if(pma->array [i-1].mark.operation == 0){
+        // perform CAS on the cell marker
+        marker_t old = pma->array[i-1].mark;
+        marker_t new = {.operation = 1, .key = key, .val = val, .version = old.version + 1};
+        if(CASM(&pma->array[i-1].mark, old, new)){
+          uint64_t old_key = pma->array [i].key;
+          uint64_t old_val = pma->array [i].val;
+          if(!DCAS(&pma->array [i].key, &pma->array [i].val, old_key, key, old_val, val)){
+            pma->array [i-1].mark.operation = 0;
+            pma->array [i-1].version = pma->array [i-1].mark.version;
+            continue;
+          }
+          pma->array [i-1].mark.operation = 0;
+          pma->array [i-1].version = pma->array [i-1].mark.version;
+          break;
+        }else{
+          printf("Stuck8\n");
+          continue;
+        }
+      }
+      // else{
+      //   // Help the marked operation
+      //   if(help){
+      //     pma->array [i + 1].key = pma->array [i + 1].mark.key;
+      //     pma->array [i + 1].val = pma->array [i + 1].mark.val;
+      //   }
+      // }
+    }
       while(true){
         if(pma->array [i].version < pma->array [i].mark.version){
           printf("Stuck7\n");
@@ -388,6 +461,7 @@ void pma_insert_after (PMA pma, int64_t i, key_t key, val_t val) {
     }
   }
   pma->n++;
+  printf("%d elements added\n", pma->n);
   rebalance (pma, i);
 }
 
@@ -482,8 +556,9 @@ static bool pack (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
     if (!keyval_empty (&(pma->array [read_index]))) {
       if (read_index > write_index) {
         bool help = false;
+        printf("version: %d and marker version: %d\n", pma->array [read_index].version,  pma->array [read_index].mark.version);
         if(pma->array [read_index].version < pma->array [read_index].mark.version){
-          printf("Stuck9\n");
+          printf("Stuck9: read index is %d and write idx is %d\n", read_index, write_index);
           return false;
         }
         if(pma->array[read_index].mark.operation == 0){
@@ -498,20 +573,20 @@ static bool pack (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
               if(!CAS(&pma->array [read_index].key, old_key_from, 0ULL)){
                 //can fail here because can be helped
               }
+              (pma->array [read_index].mark.operation = 0);
+              (pma->array [read_index].version = pma->array [read_index].mark.version);
             }else{
               (pma->array [read_index].mark.operation = 0);
               (pma->array [read_index].version = pma->array [read_index].mark.version);
               return false;
             }
-            (pma->array [read_index].mark.operation = 0);
-            (pma->array [read_index].version = pma->array [read_index].mark.version);
           }else{
             printf("Stuck10\n");
             return false;
           }
         }else{
           if(help){
-            pma->array [read_index].key = 0ULL;
+            pma->array [read_index].key = pma->array [read_index].mark.key;
           }
         }
       }
@@ -531,33 +606,38 @@ static bool spread (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
   uint64_t read_index = from + n - 1;
   uint64_t write_index = (to << 8) - frequency;
   while ((write_index >> 8) > read_index) {
-    // pma->array [write_index >> 8].key = pma->array [read_index].key;
-    // pma->array [write_index >> 8].val = pma->array [read_index].val;
-    // keyval_clear (&(pma->array [read_index]));
-    // printf("Cell version: %d , Marker version: %d, Read Index: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version, read_index);
-    // assert(pma->array [read_index].version == pma->array [read_index].mark.version);
-    while(true){
-      bool help = false;
-      if(pma->array [read_index].version < pma->array [read_index].mark.version){
-        printf("Stuck11\n");
-        return false;
-      }
-      // if(pma->array [read_index].mark.operation == 0){
-        // perform CAS on the cell marker
-        marker_t old = pma->array[read_index].mark;
-        marker_t new = {.operation = 2, .key = 0, .val = 0, .version = old.version + 1};
-        if(CASM(&pma->array[read_index].mark, old, new)){
-          (pma->array [write_index >> 8].key = pma->array [read_index].key);
-          (pma->array [write_index >> 8].val = pma->array [read_index].val);
-          keyval_clear (&(pma->array [read_index]));
+    bool help = false;
+    if(pma->array [read_index].version < pma->array [read_index].mark.version){
+      printf("Stuck11\n");
+      return false;
+    }
+    if(pma->array[read_index].mark.operation == 0){
+      marker_t old = pma->array[read_index].mark;
+      marker_t new = {.operation = 1, .key = 0, .val = old.key, .version = old.version + 1};
+      if(CASM(&pma->array[read_index].mark, old, new)){
+        uint64_t old_key = pma->array [write_index >> 8].key;
+        uint64_t old_val = pma->array [write_index >> 8].val;
+        if(DCAS(&pma->array [write_index >> 8].key, &pma->array [write_index >> 8].val, old_key, pma->array [read_index].key, old_val, pma->array [read_index].val)){
+          uint64_t old_key_from = pma->array [read_index].key;
+          help = true;
+          if(!CAS(&pma->array [read_index].key, old_key_from, 0ULL)){
+            //can fail here because can be helped
+          }
           (pma->array [read_index].mark.operation = 0);
           (pma->array [read_index].version = pma->array [read_index].mark.version);
-          break;
         }else{
-          printf("Stuck12\n");
+          (pma->array [read_index].mark.operation = 0);
+          (pma->array [read_index].version = pma->array [read_index].mark.version);
           return false;
         }
-      // }
+      }else{
+        printf("Stuck12\n");
+        return false;
+      }
+    }else{
+      if(help){
+        pma->array [read_index].key = pma->array [read_index].mark.key;
+      }
     }
     read_index--;
     write_index -= frequency;
@@ -629,8 +709,9 @@ static void compute_capacity (PMA pma) {
 
 void *threadFunc(void *args){
   int tid = *((int *)args);
-  for(int i=pow(10,tid);i<=pow(10,tid+1);i++){
-    pma_insert(pma1, i, i);
+  printf("tid is %d \n", tid);
+  for(uint64_t x=pow(10,tid);x<=pow(10,tid+1);x++){
+    pma_insert(pma1, x, x);
   }
   pthread_exit(NULL);
 
@@ -640,17 +721,22 @@ int main(int argc, char *argv[]) {
   pthread_t tid[7];
   int msec = 0, trigger = 10; /* 10ms */
   clock_t before = clock();
-  for(int i=0;i<5;i++){
+  for(int x=0;x<NO_OF_THREADS;x++){
     int *temp = calloc(1,sizeof(int));
-    *temp = i;
-    if(pthread_create(&tid[i],NULL,threadFunc, (void *)temp)!=0){
+    *temp = x;
+    if(pthread_create(&tid[x],NULL,threadFunc, (void *)temp)!=0){
       printf("Cannot spawn thread\n");
       exit(-1);
     }
   }
-  for(int i=0;i<5;i++){
-    pthread_join(tid[i],NULL);
+  printf("after pthread_create \n");
+  for(int x=0;x<NO_OF_THREADS;x++){
+    if (pthread_join(tid[x],NULL)!=0){
+      perror("pthread_join");
+      exit(-1);
+    }
   }
+  printf("after pthread_join \n");
   clock_t difference = clock() - before;
   msec = difference * 1000 / CLOCKS_PER_SEC;
   printf("Time taken: %d seconds %d milliseconds\n",
