@@ -143,7 +143,7 @@ uint8_t pma_segment_size (PMA pma) {
 static void rebalance (PMA pma, int64_t i);
 static bool pack (PMA pma, uint64_t from, uint64_t to, uint64_t n);
 static bool spread (PMA pma, uint64_t from, uint64_t to, uint64_t n);
-static void resize (PMA pma);
+static bool resize (PMA pma);
 static void compute_capacity (PMA pma);
 
 PMA pma_create () {
@@ -265,7 +265,7 @@ void pma_insert_after (PMA pma, int64_t i, key_t key, val_t val) {
     }
     // pma->array [i+1].key = key;
     // pma->array [i+1].val = val;
-    printf("Cell version: %d , Marker version: %d\n", pma->array [i + 1].version , pma->array [i + 1].mark.version);
+    // printf("Cell version: %d , Marker version: %d\n", pma->array [i + 1].version , pma->array [i + 1].mark.version);
     while(true){
       if(pma->array [i + 1].version < pma->array [i + 1].mark.version){
         continue;
@@ -406,10 +406,12 @@ static void rebalance (PMA pma, int64_t i) {
   /* Found a window within threshold. */
   if (density >= p_height && density < t_height) {
     // printf("window_start: %d, window_end: %d\n", window_start, window_end);
-    pack (pma, window_start, window_end, occupancy) &&
-    spread (pma, window_start, window_end, occupancy);
+    while(!(pack(pma, window_start, window_end, occupancy) &&
+    spread(pma, window_start, window_end, occupancy))){
+      // printf("HELLO");
+    };
   } else {
-    resize (pma);
+    while(!resize (pma));
   }
 }
 
@@ -422,49 +424,66 @@ static bool pack (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
   while (read_index < to) {
     if (!keyval_empty (&(pma->array [read_index]))) {
       if (read_index > write_index) {
-        (pma->array [write_index].key = pma->array [read_index].key) &&
-        (pma->array [write_index].val = pma->array [read_index].val);
-        // while(true){
-        //   if(pma->array [read_index].version < pma->array [read_index].mark.version){
-        //     return false;
-        //   }
-        //   if(pma->array [read_index].mark.operation == 0){
-        //     // perform CAS on the cell marker
-        //     marker_t old = pma->array[read_index].mark;
-        //     marker_t new = {.operation = 2, .key = 0, .val = 0, .version = old.version + 1};
-        //     if(CASM(&pma->array[read_index].mark, old, new)){
-        //       if(pma->array [write_index].version < pma->array [write_index].mark.version){
-        //         return false;
-        //       }
-        //       if(pma->array [write_index].mark.operation == 0){
-        //         marker_t w_old = pma->array[write_index].mark;
-        //         marker_t w_new = {.operation = 1, .key = pma->array [read_index].key, .val = pma->array [read_index].val, .version = w_old.version + 1};
-        //         if(CASM(&pma->array[write_index].mark, w_old, w_new)){
-        //           pma->array [write_index].key = pma->array [read_index].key &&
-        //           pma->array [write_index].val = pma->array [read_index].val && 
-        //           keyval_clear (&(pma->array [read_index]) && 
-        //           pma->array [write_index].mark.operation = 0 &&
-        //           pma->array [write_index].version = pma->array [write_index].mark.version &&
-        //           pma->array [read_index].mark.operation = 0 &&
-        //           pma->array [read_index].version = pma->array [read_index].mark.version;
-        //         }else{
-        //           return false;
-        //         }
-        //       }else{
-        //         pma->array [write_index].key = pma->array [write_index].mark.key && 
-        //         pma->array [write_index].val = pma->array [write_index].mark.val &&
-        //         keyval_clear (&(pma->array [read_index]));              }
-        //     }else{
-        //       return false;
-        //     }
-        //   }
-        // }
+        // (pma->array [write_index].key = pma->array [read_index].key);
+        // (pma->array [write_index].val = pma->array [read_index].val);
+        // keyval_clear (&(pma->array [read_index]));
+        printf("Cell version: %d , Marker version: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version);
+        assert(pma->array [read_index].version == pma->array [read_index].mark.version);
+        while(true){
+          bool help = false;
+          if(pma->array [read_index].version < pma->array [read_index].mark.version){
+            // printf("HELLO1");
+            return false;
+          }
+          // if(pma->array [read_index].mark.operation == 0){
+            // perform CAS on the cell marker
+            marker_t old = pma->array[read_index].mark;
+            marker_t new = {.operation = 2, .key = 0, .val = 0, .version = old.version + 1};
+            if(CASM(&pma->array[read_index].mark, old, new)){
+              (pma->array [write_index].key = pma->array [read_index].key);
+              (pma->array [write_index].val = pma->array [read_index].val);
+              keyval_clear (&(pma->array [read_index]));
+              (pma->array [read_index].mark.operation = 0);
+              (pma->array [read_index].version = pma->array [read_index].mark.version);
+              break;
+              // if(pma->array [write_index].version < pma->array [write_index].mark.version){
+              //   (pma->array [read_index].mark.operation = 0) &&
+              //   (pma->array [read_index].version = pma->array [read_index].mark.version);
+              //   return false;
+              // }
+              // if(pma->array [write_index].mark.operation == 0){
+              //   marker_t w_old = pma->array[write_index].mark;
+              //   marker_t w_new = {.operation = 1, .key = pma->array [read_index].key, .val = pma->array [read_index].val, .version = w_old.version + 1};
+              //   if(CASM(&pma->array[write_index].mark, w_old, w_new)){
+              //     (pma->array [write_index].key = pma->array [read_index].key) &&
+              //     (pma->array [write_index].val = pma->array [read_index].val) && 
+              //     (pma->array [write_index].mark.operation = 0) &&
+              //     (pma->array [write_index].version = pma->array [write_index].mark.version);
+              //     keyval_clear (&(pma->array [read_index]));
+              //     (pma->array [read_index].mark.operation = 0) &&
+              //     (pma->array [read_index].version = pma->array [read_index].mark.version);
+              //     help = true;
+              //     // keyval_clear (&(pma->array [read_index]));
+              //   }else{
+              //     (pma->array [read_index].mark.operation = 0) &&
+              //     (pma->array [read_index].version = pma->array [read_index].mark.version);
+              //     return false;
+              //   }
+              // }else{
+              //   (pma->array [write_index].key = pma->array [write_index].mark.key) && 
+              //   (pma->array [write_index].val = pma->array [write_index].mark.val);              
+              // }
+            }else{
+              return false;
+            }
+          // }
+        }
       }
       write_index++;
     }
     read_index++;
-    return true;
   }
+  return true;
   // assert (n == write_index - from);
 }
 
@@ -476,17 +495,68 @@ static bool spread (PMA pma, uint64_t from, uint64_t to, uint64_t n) {
   uint64_t read_index = from + n - 1;
   uint64_t write_index = (to << 8) - frequency;
   while ((write_index >> 8) > read_index) {
-    pma->array [write_index >> 8].key = pma->array [read_index].key;
-    pma->array [write_index >> 8].val = pma->array [read_index].val;
-    keyval_clear (&(pma->array [read_index]));
+    // pma->array [write_index >> 8].key = pma->array [read_index].key;
+    // pma->array [write_index >> 8].val = pma->array [read_index].val;
+    // keyval_clear (&(pma->array [read_index]));
+    printf("Cell version: %d , Marker version: %d, Read Index: %d\n", pma->array [read_index].version , pma->array [read_index].mark.version, read_index);
+    assert(pma->array [read_index].version == pma->array [read_index].mark.version);
+    while(true){
+      bool help = false;
+      if(pma->array [read_index].version < pma->array [read_index].mark.version){
+        // printf("HELLO1");
+        return false;
+      }
+      // if(pma->array [read_index].mark.operation == 0){
+        // perform CAS on the cell marker
+        marker_t old = pma->array[read_index].mark;
+        marker_t new = {.operation = 2, .key = 0, .val = 0, .version = old.version + 1};
+        if(CASM(&pma->array[read_index].mark, old, new)){
+          (pma->array [write_index >> 8].key = pma->array [read_index].key);
+          (pma->array [write_index >> 8].val = pma->array [read_index].val);
+          keyval_clear (&(pma->array [read_index]));
+          (pma->array [read_index].mark.operation = 0);
+          (pma->array [read_index].version = pma->array [read_index].mark.version);
+          break;
+          // if(pma->array [write_index].version < pma->array [write_index].mark.version){
+          //   (pma->array [read_index].mark.operation = 0) &&
+          //   (pma->array [read_index].version = pma->array [read_index].mark.version);
+          //   return false;
+          // }
+          // if(pma->array [write_index].mark.operation == 0){
+          //   marker_t w_old = pma->array[write_index].mark;
+          //   marker_t w_new = {.operation = 1, .key = pma->array [read_index].key, .val = pma->array [read_index].val, .version = w_old.version + 1};
+          //   if(CASM(&pma->array[write_index].mark, w_old, w_new)){
+          //     (pma->array [write_index].key = pma->array [read_index].key) &&
+          //     (pma->array [write_index].val = pma->array [read_index].val) && 
+          //     (pma->array [write_index].mark.operation = 0) &&
+          //     (pma->array [write_index].version = pma->array [write_index].mark.version);
+          //     keyval_clear (&(pma->array [read_index]));
+          //     (pma->array [read_index].mark.operation = 0) &&
+          //     (pma->array [read_index].version = pma->array [read_index].mark.version);
+          //     help = true;
+          //     // keyval_clear (&(pma->array [read_index]));
+          //   }else{
+          //     (pma->array [read_index].mark.operation = 0) &&
+          //     (pma->array [read_index].version = pma->array [read_index].mark.version);
+          //     return false;
+          //   }
+          // }else{
+          //   (pma->array [write_index].key = pma->array [write_index].mark.key) && 
+          //   (pma->array [write_index].val = pma->array [write_index].mark.val);              
+          // }
+        }else{
+          return false;
+        }
+      // }
+    }
     read_index--;
     write_index -= frequency;
   }
   return true;
 }
 
-static void resize (PMA pma) {
-  pack (pma, 0, pma->m, pma->n);
+static bool resize (PMA pma) {
+  if (!pack (pma, 0, pma->m, pma->n)) return false;
   compute_capacity (pma);
   pma->h = floor_lg (pma->num_segments) + 1;
   pma->delta_t = (t_0 - t_h) / pma->h;
@@ -494,7 +564,8 @@ static void resize (PMA pma) {
   pma->array = (keyval_t *)realloc (pma->array, sizeof (keyval_t) * pma->m);
   for (uint64_t i = pma->n; i < pma->m; i++)
     keyval_clear (&(pma->array [i]));
-  spread (pma, 0, pma->m, pma->n);
+  if (!spread (pma, 0, pma->m, pma->n)) return false;
+  return true;
 }
 
 static void compute_capacity (PMA pma) {
@@ -516,7 +587,7 @@ int main(int argc, char *argv[]) {
   PMA pma1 = pma_create();
   int msec = 0, trigger = 10; /* 10ms */
   clock_t before = clock();
-  for(int i=0;i<10;i++){
+  for(int i=0;i<140;i++){
     pma_insert(pma1, i+1, i+1);
     clock_t difference = clock() - before;
     msec = difference * 1000 / CLOCKS_PER_SEC;
