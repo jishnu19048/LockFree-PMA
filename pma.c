@@ -21,7 +21,7 @@
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
-#define NO_OF_THREADS 4
+#define NO_OF_THREADS 2
 /*
  * Returns the 1-based index of the last (i.e., most significant) bit set in x.
  */
@@ -187,7 +187,7 @@ static void rebalance(PMA pma, int64_t i);
 static bool pack(PMA pma, uint64_t from, uint64_t to, uint64_t n);
 static bool spread(PMA pma, uint64_t from, uint64_t to, uint64_t n);
 static bool resize(PMA pma);
-static void compute_capacity(PMA pma);
+static uint64_t compute_capacity(PMA pma);
 
 PMA pma_create()
 {
@@ -377,11 +377,6 @@ void pma_insert_after(PMA pma, int64_t i, key_t key, val_t val)
       }
       j--;
     }
-    // printf("version: %d and marker version: %d\n", pma->array[2].version, pma->array[2].mark.version);
-    // pma->array [i+1].key = key;
-    // pma->array [i+1].val = val;
-    // printf("Cell version: %d , Marker version: %d\n", pma->array [i + 1].version , pma->array [i + 1].mark.version);
-    // printf("version: %d and marker verSion: %d\n", pma->array[i].version, pma->array[i].mark.version);
     while (true)
     {
       bool help = false;
@@ -431,10 +426,6 @@ void pma_insert_after(PMA pma, int64_t i, key_t key, val_t val)
     { /* Found one. */
       while (j < i)
       { /* Push elements to make space for the new element. */
-        // pma->array [j].key = pma->array [j + 1].key;
-        // pma->array [j].val = pma->array [j + 1].val;
-        // pma->array [j].mark = pma->array [j + 1].mark;
-        // pma->array [j].version = pma->array [j + 1].version;
         while (true)
         {
           bool help = false;
@@ -527,8 +518,8 @@ void pma_insert_after(PMA pma, int64_t i, key_t key, val_t val)
     }
   }
   pma->n++;
-  // printf("%d elements added\n", pma->n);
   rebalance(pma, i);
+  // printf("New size of pma: %d\n", pma->m);
 }
 
 bool pma_delete(PMA pma, key_t key)
@@ -619,13 +610,13 @@ static void rebalance(PMA pma, int64_t i)
     while (!(pack(pma, window_start, window_end, occupancy) &&
              spread(pma, window_start, window_end, occupancy)))
     {
-      // printf("HELLO");
+      printf("FOUND WINDOW\n");
     };
   }
   else
   {
     while (!resize(pma))
-      ;
+      printf("THIS IS RESIZE\n");
   }
 }
 
@@ -661,8 +652,8 @@ static bool pack(PMA pma, uint64_t from, uint64_t to, uint64_t n)
             if (DCAS(&pma->array[write_index].key, &pma->array[write_index].val, old_key, pma->array[read_index].key, old_val, pma->array[read_index].val))
             {
               pma->array[write_index].mark = pma->array[read_index].mark;
-              pma->array[write_index].mark.operation = 0;
               pma->array[write_index].version = pma->array[read_index].mark.version;
+              pma->array[write_index].mark.operation = 0;
               uint64_t old_key_from = pma->array[read_index].key;
               help = true;
               if (!CAS(&pma->array[read_index].key, old_key_from, 0ULL))
@@ -690,6 +681,7 @@ static bool pack(PMA pma, uint64_t from, uint64_t to, uint64_t n)
           if (help)
           {
             pma->array[read_index].key = pma->array[read_index].mark.key;
+            pma->array[read_index].val = pma->array[read_index].mark.val;
           }
         }
       }
@@ -771,12 +763,13 @@ static bool resize(PMA pma)
   if (!pack(pma, 0, pma->m, pma->n))
     return false;
   uint64_t old_m = pma->m;
-  compute_capacity(pma);
+  uint64_t new_m = compute_capacity(pma);
+  pma->m = new_m;
   pma->h = floor_lg(pma->num_segments) + 1;
   pma->delta_t = (t_0 - t_h) / pma->h;
   pma->delta_p = (p_h - p_0) / pma->h;
-  pma->array = (keyval_t *)realloc(pma->array, sizeof(keyval_t) * pma->m);
-  for (int x = old_m; x < pma->m; x++)
+  pma->array = (keyval_t *)realloc(pma->array, sizeof(keyval_t) * new_m);
+  for (int x = old_m; x < new_m; x++)
   {
     pma->array[x].version = 0;
     marker_t mk1 = {.operation = 0, .key = 0, .val = 0, .version = 0};
@@ -826,7 +819,7 @@ static bool resize(PMA pma)
   return true;
 }
 
-static void compute_capacity(PMA pma)
+static uint64_t compute_capacity(PMA pma)
 {
   pma->s = ceil_lg(pma->n);                     /* Ideal segment size. */
   pma->num_segments = ceil_div(pma->n, pma->s); /* Ideal number of segments. */
@@ -834,19 +827,20 @@ static void compute_capacity(PMA pma)
   pma->num_segments = hyperceil(pma->num_segments);
   /* Update the segment size accordingly. */
   pma->s = ceil_div(pma->n, pma->num_segments);
-  pma->m = pma->s * pma->num_segments;
+  uint64_t m = pma->s * pma->num_segments;
   /* Scale up as much as possible. */
-  pma->m = max_sparseness * pma->m;
+  m = max_sparseness * pma->m;
   pma->s = max_sparseness * pma->s;
-  assert(pma->m <= MAX_SIZE);
-  assert(pma->m > pma->n);
+  assert(m <= MAX_SIZE);
+  assert(m > pma->n);
+  return m;
 }
 
 void *threadFunc(void *args)
 {
   int tid = *((int *)args);
   // printf("tid is %d \n", tid);
-  for (uint64_t x = pow(10, tid); x <= pow(10, tid + 1); x++)
+  for (uint64_t x = pow(10, tid); x <= pow(10, tid + 2); x++)
   {
     pma_insert(pma1, x, x);
   }
@@ -874,6 +868,7 @@ int main(int argc, char *argv[])
     if (pthread_join(tid[x], NULL) != 0)
     {
       perror("pthread_join");
+      printf("Cannot join thread\n");
       exit(-1);
     }
   }
