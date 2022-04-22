@@ -6,7 +6,7 @@
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
-#define NO_OF_THREADS 1
+#define NO_OF_THREADS 10
 /* Reserve 8 bits to allow for fixed point arithmetic. */
 #define MAX_SIZE ((1ULL << 56) - 1ULL)
 /* Height-based (as opposed to depth-based) thresholds. */
@@ -187,7 +187,7 @@ PMA pma_create()
     PMA pma = (PMA)malloc(sizeof(pma_t));
     pma->n = 0;
     pma->s = largest_empty_segment;
-    pma->m = (1000000);
+    pma->m = (10000000);
     pma->num_segments = pma->m / pma->s;
     pma->h = floor_lg(pma->num_segments) + 1;
     pma->delta_t = (t_0 - t_h) / pma->h;
@@ -300,12 +300,12 @@ void move(PMA pma, uint64_t from, uint64_t to)
 bool rebalance_move(PMA pma, uint64_t from, uint64_t to)
 {
 
-    bool help = false;
-    if (pma->array[from].version < pma->array[from].mark.version)
-    {
-        // printf("Version: %d and Marker Version %d\n", pma->array[i-1].version ,pma->array[i-1].mark.version);
-        return false;
-    }
+    // bool help = false;
+    // if (pma->array[from].version < pma->array[from].mark.version)
+    // {
+    //     printf("Version: %d and Marker Version %d\n", pma->array[from].version ,pma->array[from].mark.version);
+    //     return false;
+    // }
     if (pma->array[from].mark.operation == 0 )
     {
         // perform CAS on the cell marker
@@ -407,8 +407,6 @@ static void rebalance(PMA pma, int64_t i)
     /* Found a window within threshold. */
     if (density >= p_height && density < t_height)
     {
-        // printf("Found a window with window_start: %d, window_end: %d\n", window_start, window_end);
-        // bool b = pack(pma, window_start, window_end, occupancy) && spread(pma, window_start, window_end, occupancy);
         if (!(pack(pma, window_start, window_end, occupancy) && spread(pma, window_start, window_end, occupancy)))
         {
             // printf("PACK & SPREAD FAILED\n");
@@ -529,19 +527,18 @@ void pma_print(PMA pma)
 }
 void *threadFunc(void *args)
 {
-  int tid = *((int *)args);
-  // printf("tid is %d \n", tid);
-  uint64_t interval = 100000/NO_OF_THREADS;
-  for (uint64_t x = interval*tid; x <= interval*(tid+1); x++)
-  {
-    pma_insert(pma_test, x, x, x);
-  }
-  pthread_exit(NULL);
+    int tid = *((int *)args);
+    // printf("tid is %d \n", tid);
+    for (uint64_t x = (100000)*tid+1; x <= (100000)*(tid+1); x++)
+    {
+        pma_insert(pma_test, x, x, x);
+    }
+    pthread_exit(NULL);
 }
 int main()
 {
     pma_test = pma_create();
-    pthread_t tid[7];
+    pthread_t tid[10];
     int msec = 0, trigger = 10; /* 10ms */
     clock_t before = clock();
     // pma_print(pma_test);
