@@ -417,10 +417,10 @@ static void rebalance(PMA pma, int64_t i)
     }
     else
     {
-        printf("Current capacity before resize: %d\n",pma->m);
+        // printf("Current capacity before resize: %d\n",pma->m);
         if (!resize(pma))
         {
-            printf("RESIZE FAILED\n");
+            // printf("RESIZE FAILED\n");
             rebalance(pma, i);
         }
 
@@ -473,7 +473,7 @@ static bool spread(PMA pma, uint64_t from, uint64_t to, uint64_t n)
 static bool resize(PMA pma)
 {
     if (!pack(pma, 0, pma->m, pma->n)){
-        printf("PACK FAILED\n");
+        // printf("PACK FAILED\n");
         return false;
     }
     uint64_t old_m = pma->m;
@@ -497,7 +497,7 @@ static bool resize(PMA pma)
         insert(pma, 0, 0, x);
     }
     if (!spread(pma, 0, pma->m, pma->n)){
-        printf("SPREAD FAILED\n");
+        // printf("SPREAD FAILED\n");
         return false;
     }
     return true;
@@ -532,10 +532,19 @@ void *threadFunc(void *args)
   int tid = *((int *)args);
   // printf("tid is %d \n", tid);
   uint64_t interval = 100000/NO_OF_THREADS;
-  for (uint64_t x = interval*tid; x <= interval*(tid+1); x++)
+  int start = interval* tid;
+  int end = interval * (tid+1);
+//   for (uint64_t x = (20000)*tid+1; x <= (20000)*(tid+1); x++)
+//   {
+//     pma_insert(pma_test, x, x, x);
+//   }
+
+    for (uint64_t x = 11; x <= (20000)*(5); x++)
   {
     pma_insert(pma_test, x, x, x);
   }
+
+
   pthread_exit(NULL);
 }
 int main()
