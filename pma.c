@@ -21,7 +21,7 @@
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
-#define NO_OF_THREADS 2
+#define NO_OF_THREADS 1
 /*
  * Returns the 1-based index of the last (i.e., most significant) bit set in x.
  */
@@ -194,7 +194,8 @@ PMA pma_create()
   PMA pma = (PMA)malloc(sizeof(pma_t));
   pma->n = 0;
   pma->s = largest_empty_segment;
-  pma->m = (1ULL << largest_empty_segment);
+  // pma->m = (1ULL << largest_empty_segment);
+  pma->m = 1000000;
   pma->num_segments = pma->m / pma->s;
   pma->h = floor_lg(pma->num_segments) + 1;
   pma->delta_t = (t_0 - t_h) / pma->h;
@@ -333,6 +334,7 @@ void pma_insert_after(PMA pma, int64_t i, key_t key, val_t val)
         if (pma->array[j-1].mark.operation == 0)
         {
           marker_t old = pma->array[j-1].mark;
+
           marker_t new = {.operation = 1, .key = 0, .val = 0, .version = old.version + 1};
           if (CASM(&pma->array[j-1].mark, old, new))
           {
@@ -764,17 +766,19 @@ static bool resize(PMA pma)
     return false;
   uint64_t old_m = pma->m;
   uint64_t new_m = compute_capacity(pma);
-  pma->m = new_m;
   pma->h = floor_lg(pma->num_segments) + 1;
   pma->delta_t = (t_0 - t_h) / pma->h;
   pma->delta_p = (p_h - p_0) / pma->h;
   pma->array = (keyval_t *)realloc(pma->array, sizeof(keyval_t) * new_m);
   for (int x = old_m; x < new_m; x++)
   {
+    pma->array[x].key = 0;
+    pma->array[x].val = 0;
     pma->array[x].version = 0;
     marker_t mk1 = {.operation = 0, .key = 0, .val = 0, .version = 0};
     pma->array[x].mark = mk1;
   }
+  pma->m = new_m;
   for (uint64_t i = pma->n; i < pma->m; i++)
   {
     while (true)
@@ -840,9 +844,9 @@ void *threadFunc(void *args)
 {
   int tid = *((int *)args);
   // printf("tid is %d \n", tid);
-  for (uint64_t x = pow(10, tid); x <= pow(10, tid + 2); x++)
+  for (uint64_t x = pow(10, tid); x <= pow(10, tid + 5); x++)
   {
-    pma_insert(pma1, x, x);
+    pma_insert_after(pma1, x, x, x);
   }
   pthread_exit(NULL);
 }
