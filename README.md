@@ -16,3 +16,7 @@ We extend the existing sequential PMA to a parallel lock-free setting by using c
 - [Jishnu Raj Parashar Jain](https://github.com/jishnu19048) <br>
 - [Nandika Jain](https://github.com/nandikajain) <br>
 - [Saatvik Bhatnagar](https://github.com/Saatvik07) 
+
+### References
+*[1]* M.A. Bender, E.D. Demaine, and M. Farach-Colton. Cache-oblivious b-trees. In Proceedings 41st Annual Symposium on Foundations of Computer Science, pages 399–409, 2000.<br>
+*[2]* Michael A. Bender, Jeremy T. Fineman, Seth Gilbert, and Bradley C. Kuszmaul. Concurrent cache-oblivious b-trees. In Proceedings of the Seventeenth Annual ACM Symposium on Parallelism in Algorithms and Architectures, SPAA ’05, page 228–237, New York, NY, USA, 2005. Association for Computing Machinery.
