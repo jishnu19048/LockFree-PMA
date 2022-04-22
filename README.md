@@ -13,7 +13,7 @@ We extend the existing sequential PMA to a parallel lock-free setting by using c
 
 ### *Contact us:*
 
-- [Jishnu Raj Parashar Jain](https://github.com/jishnu19048) <br>
+- [Jishnu Raj Parashar](https://github.com/jishnu19048) <br>
 - [Nandika Jain](https://github.com/nandikajain) <br>
 - [Saatvik Bhatnagar](https://github.com/Saatvik07) 
 
