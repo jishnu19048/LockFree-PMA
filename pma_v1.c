@@ -415,10 +415,10 @@ static void rebalance(PMA pma, int64_t i)
     }
     else
     {
-        printf("Current capacity before resize: %d\n",pma->m);
+        // printf("Current capacity before resize: %d\n",pma->m);
         if (!resize(pma))
         {
-            printf("RESIZE FAILED\n");
+            // printf("RESIZE FAILED\n");
             rebalance(pma, i);
         }
 
@@ -471,7 +471,7 @@ static bool spread(PMA pma, uint64_t from, uint64_t to, uint64_t n)
 static bool resize(PMA pma)
 {
     if (!pack(pma, 0, pma->m, pma->n)){
-        printf("PACK FAILED\n");
+        // printf("PACK FAILED\n");
         return false;
     }
     uint64_t old_m = pma->m;
@@ -495,7 +495,7 @@ static bool resize(PMA pma)
         insert(pma, 0, 0, x);
     }
     if (!spread(pma, 0, pma->m, pma->n)){
-        printf("SPREAD FAILED\n");
+        // printf("SPREAD FAILED\n");
         return false;
     }
     return true;
